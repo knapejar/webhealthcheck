@@ -1,0 +1,16 @@
+{
+  "name": "webhealthcheck",
+  "version": "1.0.0",
+  "description": "Minimalistic domain health check system with Slack integration",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "test": "node test/healthcheck.test.js"
+  },
+  "keywords": ["health-check", "monitoring", "slack", "webhook"],
+  "author": "knapejar",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}

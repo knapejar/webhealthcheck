@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  webhealthcheck:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      # Configure the domains you want to monitor
+      - DOMAINS=https://example.com;https://google.com;https://github.com
+      # Set your Slack webhook URL for notifications
+      - SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
+      # Optional: Set check interval in minutes (default: 1)
+      - CHECK_INTERVAL_MINUTES=1
+      # Optional: Set custom port (default: 3000)
+      - PORT=3000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "const http = require('http'); http.get('http://localhost:3000/api/status', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1));"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
