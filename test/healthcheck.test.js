@@ -16,6 +16,24 @@ function startTestServer() {
       if (url === '/healthy') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end('<html><body>Healthy page</body></html>');
+      } else if (url === '/redirect') {
+        res.writeHead(302, { 'Location': '/healthy' });
+        res.end('Redirecting...');
+      } else if (url === '/redirect-301') {
+        res.writeHead(301, { 'Location': '/healthy' });
+        res.end('Moved Permanently');
+      } else if (url === '/redirect-303') {
+        res.writeHead(303, { 'Location': '/healthy' });
+        res.end('See Other');
+      } else if (url === '/redirect-307') {
+        res.writeHead(307, { 'Location': '/healthy' });
+        res.end('Temporary Redirect');
+      } else if (url === '/redirect-308') {
+        res.writeHead(308, { 'Location': '/healthy' });
+        res.end('Permanent Redirect');
+      } else if (url === '/created') {
+        res.writeHead(201, { 'Content-Type': 'text/html' });
+        res.end('<html><body>Created successfully</body></html>');
       } else if (url === '/php-error') {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end('<html><body>A PHP Error was encountered in this page</body></html>');
@@ -168,6 +186,78 @@ async function test404ErrorDetection() {
   console.log('✅ 404 error detection test passed');
 }
 
+async function test302RedirectHandling() {
+  console.log('Testing redirect status codes (301, 302, 303, 307, 308)...');
+  
+  const redirectCodes = [
+    { code: 302, path: '/redirect' },
+    { code: 301, path: '/redirect-301' },
+    { code: 303, path: '/redirect-303' },
+    { code: 307, path: '/redirect-307' },
+    { code: 308, path: '/redirect-308' }
+  ];
+  
+  for (const redirect of redirectCodes) {
+    const domain = `http://localhost:${testServerPort}${redirect.path}`;
+    
+    // Clear previous state
+    healthState.clear();
+    healthState.set(domain, {
+      status: 'unknown',
+      lastCheck: null,
+      lastError: null,
+      consecutiveErrors: 0,
+      consecutiveSuccesses: 0,
+      responseTime: null
+    });
+    
+    await checkDomain(domain);
+    
+    const state = healthState.get(domain);
+    
+    assert.strictEqual(state.status, 'healthy', `Domain should be healthy for ${redirect.code} redirect`);
+    assert.strictEqual(state.consecutiveErrors, 0, `Should have 0 consecutive errors for ${redirect.code}`);
+    assert.strictEqual(state.consecutiveSuccesses, 1, `Should have 1 consecutive success for ${redirect.code}`);
+    assert.strictEqual(state.lastError, null, `Should have no last error for ${redirect.code}`);
+    assert(state.responseTime < 5000, `Response time should be less than 5000ms for ${redirect.code}`);
+  }
+  
+  console.log('✅ Redirect status codes handling test passed');
+}
+
+async function test2xxStatusCodes() {
+  console.log('Testing 2xx status codes (200, 201)...');
+  
+  const domains = [
+    `http://localhost:${testServerPort}/healthy`, // 200
+    `http://localhost:${testServerPort}/created`  // 201
+  ];
+  
+  for (const domain of domains) {
+    // Clear previous state
+    healthState.clear();
+    healthState.set(domain, {
+      status: 'unknown',
+      lastCheck: null,
+      lastError: null,
+      consecutiveErrors: 0,
+      consecutiveSuccesses: 0,
+      responseTime: null
+    });
+    
+    await checkDomain(domain);
+    
+    const state = healthState.get(domain);
+    
+    assert.strictEqual(state.status, 'healthy', `Domain should be healthy for ${domain}`);
+    assert.strictEqual(state.consecutiveErrors, 0, 'Should have 0 consecutive errors');
+    assert.strictEqual(state.consecutiveSuccesses, 1, 'Should have 1 consecutive success');
+    assert.strictEqual(state.lastError, null, 'Should have no last error');
+  }
+  
+  console.log('✅ 2xx status codes handling test passed');
+}
+
 async function testConsecutiveErrorNotifications() {
   console.log('Testing consecutive error notifications...');
   
@@ -287,6 +377,8 @@ async function runTests() {
     await testPHPErrorDetection();
     await testSlowResponseDetection();
     await test404ErrorDetection();
+    await test302RedirectHandling();
+    await test2xxStatusCodes();
     await testConsecutiveErrorNotifications();
     await testErrorRecoveryNotification();
     
@@ -313,6 +405,8 @@ module.exports = {
   testPHPErrorDetection,
   testSlowResponseDetection,
   test404ErrorDetection,
+  test302RedirectHandling,
+  test2xxStatusCodes,
   testConsecutiveErrorNotifications,
   testErrorRecoveryNotification
 };

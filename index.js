@@ -38,8 +38,8 @@ async function checkDomain(domain) {
     const response = await makeHttpRequest(domain);
     const responseTime = Date.now() - startTime;
     
-    // Check response status
-    if (response.statusCode !== 200) {
+    // Check response status (2xx success and 3xx redirects are healthy)
+    if (response.statusCode < 200 || response.statusCode >= 400) {
       throw new Error(`HTTP ${response.statusCode}`);
     }
     
