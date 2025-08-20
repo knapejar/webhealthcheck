@@ -15,7 +15,7 @@ A minimalistic domain health check system with Slack integration built with Node
 
 The system verifies that each monitored website:
 - Returns HTTP status 200
-- Responds within 5 seconds
+- Responds within 10 seconds (configurable via TIMEOUT_SECONDS)
 - Does not contain "A PHP Error was encountered" in the page content
 
 ## Notification Logic
@@ -81,6 +81,9 @@ PORT=3000
 
 # Optional: Check interval in minutes (default: 1)
 CHECK_INTERVAL_MINUTES=1
+
+# Optional: Response timeout in seconds (default: 10)
+TIMEOUT_SECONDS=10
 ```
 
 ## Slack Integration Setup
@@ -114,8 +117,19 @@ The dashboard shows:
   - Response time
   - Consecutive error/success counts
   - Last error message (if any)
+  - **Click on any domain card to view 24-hour availability history**
 
 The page auto-refreshes every 30 seconds.
+
+### History Pages
+
+Click on any domain card to view detailed availability history:
+- 24-hour grid visualization showing minute-by-minute availability
+- Green squares indicate healthy responses
+- Red squares indicate unhealthy responses  
+- Gray squares indicate no data available
+- Responsive design that works on desktop and mobile
+- Statistics showing uptime percentage, minutes down, and total checks
 
 ## API
 
