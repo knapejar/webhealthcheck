@@ -9,11 +9,13 @@ const config = {
   domains: process.env.DOMAINS ? process.env.DOMAINS.split(';').map(d => d.trim()) : [],
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL,
   port: process.env.PORT || 3000,
-  checkIntervalMinutes: parseInt(process.env.CHECK_INTERVAL_MINUTES) || 1
+  checkIntervalMinutes: parseInt(process.env.CHECK_INTERVAL_MINUTES) || 1,
+  timeoutSeconds: parseInt(process.env.TIMEOUT_SECONDS) || 10
 };
 
 // Health check state
 const healthState = new Map();
+const healthHistory = new Map(); // Store history data: domain -> array of {timestamp, status}
 
 // Initialize health state for all domains
 config.domains.forEach(domain => {
@@ -25,6 +27,7 @@ config.domains.forEach(domain => {
     consecutiveSuccesses: 0,
     responseTime: null
   });
+  healthHistory.set(domain, []);
 });
 
 let nextCheckTime = new Date(Date.now() + config.checkIntervalMinutes * 60 * 1000);
@@ -44,8 +47,8 @@ async function checkDomain(domain) {
     }
     
     // Check response time
-    if (responseTime > 5000) {
-      throw new Error(`Response time ${responseTime}ms exceeds 5000ms`);
+    if (responseTime > config.timeoutSeconds * 1000) {
+      throw new Error(`Response time ${responseTime}ms exceeds ${config.timeoutSeconds * 1000}ms`);
     }
     
     // Check for PHP errors in content
@@ -61,6 +64,9 @@ async function checkDomain(domain) {
     state.consecutiveSuccesses++;
     state.responseTime = responseTime;
     
+    // Add to history
+    addToHistory(domain, 'healthy');
+    
     // Notify if error is resolved (after 10 successful checks)
     if (state.consecutiveSuccesses === 10) {
       await sendSlackNotification(`✅ ${domain} is now healthy after 10 consecutive successful checks`);
@@ -75,6 +81,9 @@ async function checkDomain(domain) {
     state.consecutiveSuccesses = 0;
     state.responseTime = Date.now() - startTime;
     
+    // Add to history
+    addToHistory(domain, 'unhealthy');
+    
     // Notify on first error
     if (state.consecutiveErrors === 1) {
       await sendSlackNotification(`🔴 ${domain} is unhealthy: ${error.message}`);
@@ -85,6 +94,28 @@ async function checkDomain(domain) {
       await sendSlackNotification(`⚠️ ${domain} has been unhealthy for 5 minutes: ${error.message}`);
     }
   }
+}
+
+// Add to history (keep last 24 hours)
+function addToHistory(domain, status) {
+  if (!healthHistory.has(domain)) {
+    healthHistory.set(domain, []);
+  }
+  
+  const history = healthHistory.get(domain);
+  const now = new Date();
+  
+  // Add current status
+  history.push({
+    timestamp: now.toISOString(),
+    status: status
+  });
+  
+  // Keep only last 24 hours of data
+  const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  healthHistory.set(domain, history.filter(entry => 
+    new Date(entry.timestamp) >= twentyFourHoursAgo
+  ));
 }
 
 // HTTP request helper
@@ -98,7 +129,7 @@ function makeHttpRequest(domain) {
       port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
       path: parsedUrl.pathname + parsedUrl.search,
       method: 'GET',
-      timeout: 10000, // 10 second connection timeout, we'll check response time separately
+      timeout: (config.timeoutSeconds + 5) * 1000, // Connection timeout: response timeout + 5 seconds buffer
       headers: {
         'User-Agent': 'WebHealthCheck/1.0'
       }
@@ -246,6 +277,19 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(statusData, null, 2));
     
+  } else if (parsedUrl.pathname.startsWith('/history/')) {
+    // History page for specific domain
+    const domain = decodeURIComponent(parsedUrl.pathname.substring(9)); // Remove '/history/'
+    
+    if (healthHistory.has(domain)) {
+      const html = generateHistoryPage(domain, healthHistory.get(domain));
+      res.writeHead(200, { 'Content-Type': 'text/html' });
+      res.end(html);
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('Domain not found');
+    }
+    
   } else {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not found');
@@ -280,7 +324,8 @@ function generateStatusPage(data) {
     h1 { color: #333; border-bottom: 2px solid #007acc; padding-bottom: 10px; }
     .config { background: #f8f9fa; padding: 15px; border-radius: 4px; margin-bottom: 20px; }
     .domains { display: grid; gap: 20px; }
-    .domain { border: 1px solid #ddd; padding: 20px; border-radius: 8px; }
+    .domain { border: 1px solid #ddd; padding: 20px; border-radius: 8px; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s; text-decoration: none; color: inherit; display: block; }
+    .domain:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
     .domain.healthy { border-left: 4px solid #28a745; }
     .domain.unhealthy { border-left: 4px solid #dc3545; }
     .domain.unknown { border-left: 4px solid #6c757d; }
@@ -304,7 +349,7 @@ function generateStatusPage(data) {
     
     <div class="domains">
       ${Object.entries(data.status).map(([domain, status]) => `
-        <div class="domain ${status.status}">
+        <a href="/history/${encodeURIComponent(domain)}" class="domain ${status.status}">
           <div class="status">
             ${statusEmoji(status.status)} ${domain}
           </div>
@@ -315,8 +360,9 @@ function generateStatusPage(data) {
             <p><strong>Consecutive errors:</strong> ${status.consecutiveErrors}</p>
             <p><strong>Consecutive successes:</strong> ${status.consecutiveSuccesses}</p>
             ${status.lastError ? `<div class="error"><strong>Last error:</strong> ${status.lastError}</div>` : ''}
+            <p style="margin-top: 10px; font-style: italic; color: #007acc;">Click to view history →</p>
           </div>
-        </div>
+        </a>
       `).join('')}
     </div>
   </div>
@@ -332,6 +378,162 @@ function generateStatusPage(data) {
   `.trim();
 }
 
+// Generate history page with 24-hour availability grid
+function generateHistoryPage(domain, history) {
+  const formatTime = (timestamp) => {
+    if (!timestamp) return 'Never';
+    return new Date(timestamp).toLocaleString();
+  };
+  
+  // Create 24-hour grid data (24 hours, 60 minutes each = 1440 minutes)
+  const now = new Date();
+  const minutesInDay = 24 * 60;
+  const grid = [];
+  
+  // Initialize grid with 'unknown' status
+  for (let i = 0; i < minutesInDay; i++) {
+    const minuteTime = new Date(now.getTime() - (minutesInDay - i - 1) * 60 * 1000);
+    grid.push({
+      time: minuteTime,
+      status: 'unknown',
+      hour: minuteTime.getHours(),
+      minute: minuteTime.getMinutes()
+    });
+  }
+  
+  // Fill grid with actual history data
+  history.forEach(entry => {
+    const entryTime = new Date(entry.timestamp);
+    const minutesFromStart = Math.floor((entryTime.getTime() - (now.getTime() - minutesInDay * 60 * 1000)) / (60 * 1000));
+    
+    if (minutesFromStart >= 0 && minutesFromStart < minutesInDay) {
+      grid[minutesFromStart].status = entry.status;
+    }
+  });
+  
+  // Group by hours for display
+  const hourGroups = [];
+  for (let hour = 0; hour < 24; hour++) {
+    const hourData = grid.filter(minute => minute.hour === hour);
+    hourGroups.push({
+      hour: hour,
+      minutes: hourData
+    });
+  }
+  
+  return `
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Availability History - ${domain}</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+    .container { max-width: 1200px; margin: 0 auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+    h1 { color: #333; border-bottom: 2px solid #007acc; padding-bottom: 10px; }
+    .back-link { display: inline-block; margin-bottom: 20px; padding: 8px 16px; background: #007acc; color: white; text-decoration: none; border-radius: 4px; }
+    .back-link:hover { background: #005999; }
+    .legend { display: flex; gap: 20px; margin-bottom: 20px; align-items: center; }
+    .legend-item { display: flex; align-items: center; gap: 5px; }
+    .legend-square { width: 12px; height: 12px; border: 1px solid #ddd; }
+    .history-grid { border: 1px solid #ddd; border-radius: 4px; overflow: hidden; }
+    .grid-header { background: #f8f9fa; padding: 10px; font-weight: bold; border-bottom: 1px solid #ddd; }
+    .hour-row { display: flex; border-bottom: 1px solid #eee; }
+    .hour-row:last-child { border-bottom: none; }
+    .hour-label { width: 60px; padding: 5px; font-size: 12px; font-weight: bold; background: #f8f9fa; border-right: 1px solid #eee; display: flex; align-items: center; justify-content: center; }
+    .minutes-container { display: flex; flex: 1; }
+    .minute-square { width: 8px; height: 20px; border-right: 1px solid #f0f0f0; cursor: pointer; }
+    .minute-square:last-child { border-right: none; }
+    .minute-square.healthy { background: #28a745; }
+    .minute-square.unhealthy { background: #dc3545; }
+    .minute-square.unknown { background: #e9ecef; }
+    .minute-square:hover { opacity: 0.8; transform: scale(1.1); z-index: 1; position: relative; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 20px; }
+    .stat-card { background: #f8f9fa; padding: 15px; border-radius: 4px; text-align: center; }
+    .stat-value { font-size: 24px; font-weight: bold; color: #007acc; }
+    
+    @media (max-width: 768px) {
+      .container { margin: 10px; padding: 15px; }
+      .minute-square { width: 6px; height: 15px; }
+      .hour-label { width: 45px; font-size: 10px; }
+      .legend { flex-wrap: wrap; }
+    }
+    
+    @media (max-width: 480px) {
+      .minute-square { width: 4px; height: 12px; }
+      .hour-label { width: 35px; font-size: 9px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <a href="/" class="back-link">← Back to Dashboard</a>
+    
+    <h1>24-Hour Availability History</h1>
+    <h2 style="color: #666; margin-top: 0;">${domain}</h2>
+    
+    <div class="legend">
+      <div class="legend-item">
+        <div class="legend-square healthy"></div>
+        <span>Healthy</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-square unhealthy"></div>
+        <span>Unhealthy</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-square unknown"></div>
+        <span>No Data</span>
+      </div>
+    </div>
+    
+    <div class="history-grid">
+      <div class="grid-header">
+        Last 24 Hours (Each square = 1 minute, Rows = Hours, Latest on right)
+      </div>
+      ${hourGroups.map(hourGroup => `
+        <div class="hour-row">
+          <div class="hour-label">${hourGroup.hour.toString().padStart(2, '0')}:00</div>
+          <div class="minutes-container">
+            ${hourGroup.minutes.map(minute => `
+              <div class="minute-square ${minute.status}" 
+                   title="${minute.time.toLocaleTimeString()} - ${minute.status}"></div>
+            `).join('')}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+    
+    <div class="stats">
+      <div class="stat-card">
+        <div class="stat-value">${Math.round((grid.filter(m => m.status === 'healthy').length / grid.length) * 100)}%</div>
+        <div>Uptime (24h)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${grid.filter(m => m.status === 'unhealthy').length}</div>
+        <div>Minutes Down</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${history.length}</div>
+        <div>Total Checks</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${formatTime(history.length > 0 ? history[history.length - 1].timestamp : null)}</div>
+        <div>Last Check</div>
+      </div>
+    </div>
+    
+    <script>
+      // Auto-refresh every 30 seconds
+      setTimeout(() => location.reload(), 30000);
+    </script>
+  </div>
+</body>
+</html>
+  `.trim();
+}
+
 // Start the application
 function start() {
   if (config.domains.length === 0) {
@@ -342,11 +544,17 @@ function start() {
   console.log('Starting Web Health Check System...');
   console.log(`Monitoring ${config.domains.length} domains: ${config.domains.join(', ')}`);
   console.log(`Check interval: ${config.checkIntervalMinutes} minute(s)`);
+  console.log(`Response timeout: ${config.timeoutSeconds} second(s)`);
   console.log(`Slack notifications: ${config.slackWebhookUrl ? 'Enabled' : 'Disabled'}`);
   
   // Start web server
   server.listen(config.port, () => {
     console.log(`Dashboard available at http://localhost:${config.port}`);
+  });
+  
+  // Send startup notification
+  sendSlackNotification(`🚀 Web Health Check System started monitoring ${config.domains.length} domains`).catch(err => {
+    console.log('Failed to send startup notification:', err.message);
   });
   
   // Run initial health check
@@ -379,7 +587,9 @@ if (require.main === module) {
 module.exports = {
   config,
   healthState,
+  healthHistory,
   checkDomain,
   makeHttpRequest,
-  sendSlackNotification
+  sendSlackNotification,
+  addToHistory
 };

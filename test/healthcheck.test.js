@@ -38,11 +38,11 @@ function startTestServer() {
         res.writeHead(200, { 'Content-Type': 'text/html' });
         res.end('<html><body>A PHP Error was encountered in this page</body></html>');
       } else if (url === '/slow') {
-        // Simulate slow response (6 seconds to exceed our 5s limit)
+        // Simulate slow response (11 seconds to exceed our 10s limit)
         setTimeout(() => {
           res.writeHead(200, { 'Content-Type': 'text/html' });
           res.end('<html><body>Slow page</body></html>');
-        }, 6000);
+        }, 11000);
       } else if (url === '/404') {
         res.writeHead(404, { 'Content-Type': 'text/html' });
         res.end('Not found');
@@ -155,7 +155,7 @@ async function testSlowResponseDetection() {
   assert.strictEqual(state.consecutiveErrors, 1, 'Should have 1 consecutive error');
   assert.strictEqual(state.consecutiveSuccesses, 0, 'Should have 0 consecutive successes');
   assert(state.lastError.includes('Response time'), 'Should detect slow response');
-  assert(state.responseTime > 5000, 'Response time should be recorded as >5000ms');
+  assert(state.responseTime > 10000, 'Response time should be recorded as >10000ms');
   
   console.log('✅ Slow response detection test passed');
 }
@@ -350,6 +350,16 @@ async function testErrorRecoveryNotification() {
   console.log('✅ Error recovery notification test passed');
 }
 
+async function testTimeoutConfiguration() {
+  console.log('Testing timeout configuration...');
+  
+  // Test that default timeout is 10 seconds
+  const { config } = require('../index.js');
+  assert.strictEqual(config.timeoutSeconds, 10, 'Default timeout should be 10 seconds');
+  
+  console.log('✅ Timeout configuration test passed');
+}
+
 async function testMakeHttpRequest() {
   console.log('Testing HTTP request helper...');
   
@@ -373,6 +383,7 @@ async function runTests() {
     await startTestServer();
     
     await testMakeHttpRequest();
+    await testTimeoutConfiguration();
     await testHealthyDomain();
     await testPHPErrorDetection();
     await testSlowResponseDetection();
