@@ -5,11 +5,35 @@ A minimalistic domain health check system with Slack integration built with Node
 ## Features
 
 - 🌐 Monitor multiple websites simultaneously
-- ⚡ Configurable check intervals (default: every minute)
+- ⚡ Configurable check intervals (default: every minute)  
 - 📊 Real-time web dashboard showing status and metrics
+- 💾 **Persistent data storage** - maintains 30 days of history across restarts
 - 🔔 Slack notifications for errors and recovery
 - 🐳 Docker support for easy deployment
 - 🧪 Comprehensive test coverage
+
+## Data Persistence
+
+The application automatically persists health check history data to maintain continuity across restarts:
+
+- **Storage Location**: Data is stored in JSON files in the `./data/` directory
+- **Retention Period**: 30 days of history (extended from 24 hours)
+- **File Format**: One JSON file per monitored domain (e.g., `https___example.com.json`)
+- **Automatic Cleanup**: Old data files are automatically cleaned up after 30 days
+- **Graceful Handling**: If persistence fails, the application continues running without errors
+
+### Persistence Folder Structure
+```
+webhealthcheck/
+├── data/                           # Persistence directory (auto-created)
+│   ├── https___example.com.json    # Domain history data
+│   ├── https___google.com.json     # Another domain's data
+│   └── ...                         # One file per domain
+├── index.js
+└── ...
+```
+
+**Note**: The `data/` directory is excluded from Git commits. Ensure this directory is included in your backups if you want to preserve historical data across deployments.
 
 ## Health Check Criteria
 
@@ -124,10 +148,11 @@ The page auto-refreshes every 30 seconds.
 ### History Pages
 
 Click on any domain card to view detailed availability history:
-- 24-hour grid visualization showing minute-by-minute availability
+- **24-hour grid visualization** showing minute-by-minute availability 
+- **Persistent data**: Shows historical data even after application restarts
 - Green squares indicate healthy responses
 - Red squares indicate unhealthy responses  
-- Gray squares indicate no data available
+- Gray squares indicate no data available (only for very recent minutes)
 - Responsive design that works on desktop and mobile
 - Statistics showing uptime percentage, minutes down, and total checks
 

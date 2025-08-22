@@ -3,6 +3,7 @@ const https = require('https');
 const url = require('url');
 const path = require('path');
 const fs = require('fs');
+const persistence = require('./persistence');
 
 // Configuration
 const config = {
@@ -27,7 +28,20 @@ config.domains.forEach(domain => {
     consecutiveSuccesses: 0,
     responseTime: null
   });
-  healthHistory.set(domain, []);
+});
+
+// Load persisted history data on startup
+console.log('Loading persisted health history data...');
+const loadedHistory = persistence.loadAllHistory(config.domains);
+loadedHistory.forEach((history, domain) => {
+  healthHistory.set(domain, history);
+});
+
+// Initialize empty history for domains without persisted data
+config.domains.forEach(domain => {
+  if (!healthHistory.has(domain)) {
+    healthHistory.set(domain, []);
+  }
 });
 
 let nextCheckTime = new Date(Date.now() + config.checkIntervalMinutes * 60 * 1000);
@@ -96,7 +110,7 @@ async function checkDomain(domain) {
   }
 }
 
-// Add to history (keep last 24 hours)
+// Add to history (keep last 30 days)
 function addToHistory(domain, status) {
   if (!healthHistory.has(domain)) {
     healthHistory.set(domain, []);
@@ -111,11 +125,18 @@ function addToHistory(domain, status) {
     status: status
   });
   
-  // Keep only last 24 hours of data
-  const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  healthHistory.set(domain, history.filter(entry => 
-    new Date(entry.timestamp) >= twentyFourHoursAgo
-  ));
+  // Keep only last 30 days of data
+  const thirtyDaysAgo = new Date(now.getTime() - persistence.MAX_AGE_DAYS * 24 * 60 * 60 * 1000);
+  const filteredHistory = history.filter(entry => 
+    new Date(entry.timestamp) >= thirtyDaysAgo
+  );
+  
+  healthHistory.set(domain, filteredHistory);
+  
+  // Persist to disk (async, don't block health checks)
+  setImmediate(() => {
+    persistence.saveDomainHistory(domain, filteredHistory);
+  });
 }
 
 // HTTP request helper
@@ -557,16 +578,26 @@ function start() {
     console.log('Failed to send startup notification:', err.message);
   });
   
+  // Cleanup old data files on startup
+  persistence.cleanupOldData();
+  
   // Run initial health check
   runHealthChecks();
   
   // Schedule periodic health checks
   setInterval(runHealthChecks, config.checkIntervalMinutes * 60 * 1000);
+  
+  // Schedule periodic data cleanup (daily)
+  setInterval(() => {
+    persistence.cleanupOldData();
+  }, 24 * 60 * 60 * 1000);
 }
 
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
   console.log('Shutting down gracefully...');
+  console.log('Saving health history data...');
+  persistence.saveAllHistory(healthHistory);
   server.close(() => {
     process.exit(0);
   });
@@ -574,6 +605,8 @@ process.on('SIGTERM', () => {
 
 process.on('SIGINT', () => {
   console.log('Shutting down gracefully...');
+  console.log('Saving health history data...');
+  persistence.saveAllHistory(healthHistory);
   server.close(() => {
     process.exit(0);
   });
