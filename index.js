@@ -35,10 +35,38 @@ config.domains.forEach(domain => {
 function ensureDataDir() {
   try {
     if (!fs.existsSync(config.persistDataDir)) {
-      fs.mkdirSync(config.persistDataDir, { recursive: true });
+      // Create directory with proper permissions
+      fs.mkdirSync(config.persistDataDir, { 
+        recursive: true, 
+        mode: 0o755 // rwxr-xr-x - readable/writable by owner, readable by others
+      });
+      console.log(`Created data directory: ${config.persistDataDir}`);
+    } else {
+      // Directory exists, check if we can write to it by testing with a temp file
+      try {
+        const testFile = path.join(config.persistDataDir, '.write-test');
+        fs.writeFileSync(testFile, 'test');
+        fs.unlinkSync(testFile);
+      } catch (writeError) {
+        // Try to fix permissions if possible
+        try {
+          fs.chmodSync(config.persistDataDir, 0o755);
+          console.log(`Fixed permissions for data directory: ${config.persistDataDir}`);
+          
+          // Test write again
+          const testFile = path.join(config.persistDataDir, '.write-test');
+          fs.writeFileSync(testFile, 'test');
+          fs.unlinkSync(testFile);
+        } catch (fixError) {
+          console.warn(`Data directory exists but is not writable: ${config.persistDataDir}`);
+          console.warn('Persistence will be disabled. Please check directory permissions.');
+          throw fixError;
+        }
+      }
     }
   } catch (error) {
-    console.warn('Failed to create data directory:', error.message);
+    console.warn('Failed to create or access data directory:', error.message);
+    console.warn('Health check data will only be stored in memory.');
   }
 }
 
@@ -671,5 +699,6 @@ module.exports = {
   generateStatusPage,
   saveDomainHistory,
   loadDomainHistory,
-  loadAllPersistedData
+  loadAllPersistedData,
+  ensureDataDir
 };
