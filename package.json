@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "test": "node test/healthcheck.test.js",
+    "test": "node test/healthcheck.test.js && node test/persistence.test.js",
+    "test:health": "node test/healthcheck.test.js",
+    "test:persistence": "node test/persistence.test.js",
     "test:fix": "node test/final-fix-validation.js"
   },
   "keywords": ["health-check", "monitoring", "slack", "webhook"],

@@ -59,8 +59,10 @@ docker build -t webhealthcheck .
 ```bash
 docker run -d \
   -p 3000:3000 \
+  -v $(pwd)/data:/app/data \
   -e DOMAINS="https://example.com;https://google.com" \
   -e SLACK_WEBHOOK_URL="https://hooks.slack.com/services/YOUR/WEBHOOK/URL" \
+  -e PERSIST_DATA_DIR=/app/data \
   --name webhealthcheck \
   webhealthcheck
 ```
@@ -84,6 +86,51 @@ CHECK_INTERVAL_MINUTES=1
 
 # Optional: Response timeout in seconds (default: 10)
 TIMEOUT_SECONDS=10
+
+# Optional: Data persistence directory (default: ./data)
+PERSIST_DATA_DIR=./data
+```
+
+## Data Persistence
+
+The application automatically persists health check data to JSON files for historical analysis and continuity across restarts.
+
+### How It Works
+
+- **Storage Location**: Health data is saved in the directory specified by `PERSIST_DATA_DIR` (default: `./data`)
+- **File Format**: Each monitored domain gets its own JSON file (e.g., `https___example.com.json`)
+- **Data Retention**: Keeps the last 1 month of health check data (previously 24 hours in memory only)
+- **Automatic Loading**: On startup, the application loads any existing historical data
+- **Error Handling**: Persistence failures are logged but don't crash the application
+
+### Storage Directory
+
+**Important**: Ensure the data directory is writable and has sufficient disk space. The default `./data` directory will be created automatically if it doesn't exist.
+
+For Docker deployments, mount a volume to persist data across container restarts:
+```bash
+docker run -d \
+  -p 3000:3000 \
+  -v /host/path/to/data:/app/data \
+  -e PERSIST_DATA_DIR=/app/data \
+  -e DOMAINS="https://example.com" \
+  webhealthcheck
+```
+
+### Data Format
+
+Each domain's JSON file contains an array of health check entries:
+```json
+[
+  {
+    "timestamp": "2025-01-20T10:15:30.123Z",
+    "status": "healthy"
+  },
+  {
+    "timestamp": "2025-01-20T10:16:30.456Z", 
+    "status": "unhealthy"
+  }
+]
 ```
 
 ## Slack Integration Setup
@@ -188,6 +235,9 @@ services:
       - DOMAINS=https://example.com;https://google.com
       - SLACK_WEBHOOK_URL=https://hooks.slack.com/services/YOUR/WEBHOOK/URL
       - CHECK_INTERVAL_MINUTES=1
+      - PERSIST_DATA_DIR=/app/data
+    volumes:
+      - ./data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "const http = require('http'); http.get('http://localhost:3000/api/status', (res) => { process.exit(res.statusCode === 200 ? 0 : 1); }).on('error', () => process.exit(1));"]
