@@ -131,6 +131,147 @@ async function testLoadAllPersistedData() {
   console.log('✅ Load all persisted data test passed');
 }
 
+async function testPersistencePermissions() {
+  console.log('Testing persistence with permission scenarios...');
+  
+  const restrictedTestDir = '/tmp/test-restricted-data';
+  
+  // Create a directory and restrict permissions to simulate Docker permission issues
+  if (fs.existsSync(restrictedTestDir)) {
+    fs.rmSync(restrictedTestDir, { recursive: true, force: true });
+  }
+  
+  // Create directory with restrictive permissions (owned by root-like scenario)
+  fs.mkdirSync(restrictedTestDir, { recursive: true });
+  
+  try {
+    // Try to make it read-only to simulate permission issues
+    fs.chmodSync(restrictedTestDir, 0o555); // read and execute only
+    
+    // Set test data directory to the restricted one
+    config.persistDataDir = restrictedTestDir;
+    
+    const testDomain = 'https://permtest.com';
+    
+    // Clear in-memory history
+    healthHistory.clear();
+    healthHistory.set(testDomain, []);
+    
+    // Try to add history - this should handle the permission error gracefully
+    addToHistory(testDomain, 'healthy');
+    
+    // The persistence should fail gracefully, but in-memory should work
+    assert(healthHistory.has(testDomain), 'Should still have in-memory history');
+    assert.strictEqual(healthHistory.get(testDomain).length, 1, 'Should have 1 entry in memory');
+    
+    console.log('✅ Permission restrictions handled gracefully');
+    
+    // Now test fixing permissions
+    fs.chmodSync(restrictedTestDir, 0o755); // make writable
+    
+    // Try persistence again - should work now
+    addToHistory(testDomain, 'unhealthy');
+    
+    // Verify file was created
+    const fileName = testDomain.replace(/[^a-zA-Z0-9.-]/g, '_') + '.json';
+    const filePath = path.join(restrictedTestDir, fileName);
+    assert(fs.existsSync(filePath), 'Persistence file should exist after fixing permissions');
+    
+    console.log('✅ Persistence works after fixing permissions');
+    
+  } finally {
+    // Clean up
+    if (fs.existsSync(restrictedTestDir)) {
+      try {
+        fs.chmodSync(restrictedTestDir, 0o755); // make sure we can delete it
+        fs.rmSync(restrictedTestDir, { recursive: true, force: true });
+      } catch (cleanupError) {
+        console.warn('Could not clean up restricted test directory:', cleanupError.message);
+      }
+    }
+  }
+  
+  console.log('✅ Persistence permissions test passed');
+}
+
+async function testDirectoryAutoCreation() {
+  console.log('Testing automatic directory creation...');
+  
+  const newTestDir = '/tmp/test-auto-create/sub/deep';
+  
+  // Make sure directory doesn't exist
+  if (fs.existsSync('/tmp/test-auto-create')) {
+    fs.rmSync('/tmp/test-auto-create', { recursive: true, force: true });
+  }
+  
+  // Set test data directory to non-existent path
+  config.persistDataDir = newTestDir;
+  
+  const testDomain = 'https://autocreate.com';
+  
+  // Clear in-memory history
+  healthHistory.clear();
+  healthHistory.set(testDomain, []);
+  
+  // Add history - this should create the directory automatically
+  addToHistory(testDomain, 'healthy');
+  
+  // Verify directory was created
+  assert(fs.existsSync(newTestDir), 'Directory should be auto-created');
+  
+  // Verify file was created
+  const fileName = testDomain.replace(/[^a-zA-Z0-9.-]/g, '_') + '.json';
+  const filePath = path.join(newTestDir, fileName);
+  assert(fs.existsSync(filePath), 'Persistence file should exist in auto-created directory');
+  
+  // Clean up
+  fs.rmSync('/tmp/test-auto-create', { recursive: true, force: true });
+  
+  console.log('✅ Directory auto-creation test passed');
+}
+
+async function testDockerPermissionScenario() {
+  console.log('Testing Docker-like permission scenario...');
+  
+  const dockerTestDir = '/tmp/test-docker-data';
+  
+  // Clean up first
+  if (fs.existsSync(dockerTestDir)) {
+    fs.rmSync(dockerTestDir, { recursive: true, force: true });
+  }
+  
+  // Simulate a Docker scenario where the directory is created by root but the app runs as a different user
+  // Create directory with root-like ownership (we'll simulate with restrictive permissions)
+  fs.mkdirSync(dockerTestDir, { recursive: true });
+  fs.chmodSync(dockerTestDir, 0o555); // read and execute only, no write
+  
+  config.persistDataDir = dockerTestDir;
+  
+  const testDomain = 'https://www.helgilibrary.com/';
+  
+  // Clear in-memory history
+  healthHistory.clear();
+  healthHistory.set(testDomain, []);
+  
+  // This should trigger the permission error similar to the one in the issue
+  console.log('Attempting to save to restricted directory (simulating Docker permission issue)...');
+  addToHistory(testDomain, 'healthy');
+  
+  // The app should continue working with in-memory data
+  assert(healthHistory.has(testDomain), 'Should still have in-memory history');
+  assert.strictEqual(healthHistory.get(testDomain).length, 1, 'Should have 1 entry in memory despite persistence failure');
+  
+  // Clean up
+  try {
+    fs.chmodSync(dockerTestDir, 0o755);
+    fs.rmSync(dockerTestDir, { recursive: true, force: true });
+  } catch (cleanupError) {
+    console.warn('Could not clean up Docker test directory:', cleanupError.message);
+  }
+  
+  console.log('✅ Docker permission scenario handled gracefully');
+}
+
 async function runPersistenceTests() {
   try {
     console.log('Starting persistence tests...\n');
@@ -139,6 +280,9 @@ async function runPersistenceTests() {
     await testPersistenceRetention();
     await testPersistenceErrorHandling();
     await testLoadAllPersistedData();
+    await testPersistencePermissions();
+    await testDirectoryAutoCreation();
+    await testDockerPermissionScenario();
     
     console.log('\n🎉 All persistence tests passed successfully!');
     
@@ -172,7 +316,10 @@ module.exports = {
   testPersistenceBasic,
   testPersistenceRetention,
   testPersistenceErrorHandling,
-  testLoadAllPersistedData
+  testLoadAllPersistedData,
+  testPersistencePermissions,
+  testDirectoryAutoCreation,
+  testDockerPermissionScenario
 };
 
 // Run if executed directly
