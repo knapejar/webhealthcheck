@@ -10,7 +10,8 @@ const config = {
   slackWebhookUrl: process.env.SLACK_WEBHOOK_URL,
   port: process.env.PORT || 3000,
   checkIntervalMinutes: parseInt(process.env.CHECK_INTERVAL_MINUTES) || 1,
-  timeoutSeconds: parseInt(process.env.TIMEOUT_SECONDS) || 10
+  timeoutSeconds: parseInt(process.env.TIMEOUT_SECONDS) || 10,
+  persistDataDir: process.env.PERSIST_DATA_DIR || './data'
 };
 
 // Health check state
@@ -29,6 +30,66 @@ config.domains.forEach(domain => {
   });
   healthHistory.set(domain, []);
 });
+
+// Persistence functions
+function ensureDataDir() {
+  try {
+    if (!fs.existsSync(config.persistDataDir)) {
+      fs.mkdirSync(config.persistDataDir, { recursive: true });
+    }
+  } catch (error) {
+    console.warn('Failed to create data directory:', error.message);
+  }
+}
+
+function getDomainFileName(domain) {
+  // Replace unsafe characters for filename
+  return domain.replace(/[^a-zA-Z0-9.-]/g, '_') + '.json';
+}
+
+function saveDomainHistory(domain, history) {
+  try {
+    ensureDataDir();
+    const fileName = getDomainFileName(domain);
+    const filePath = path.join(config.persistDataDir, fileName);
+    fs.writeFileSync(filePath, JSON.stringify(history, null, 2));
+  } catch (error) {
+    console.warn(`Failed to save history for ${domain}:`, error.message);
+  }
+}
+
+function loadDomainHistory(domain) {
+  try {
+    const fileName = getDomainFileName(domain);
+    const filePath = path.join(config.persistDataDir, fileName);
+    
+    if (fs.existsSync(filePath)) {
+      const data = fs.readFileSync(filePath, 'utf8');
+      const history = JSON.parse(data);
+      
+      // Validate and filter data to last 1 month
+      const oneMonthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      return history.filter(entry => 
+        entry.timestamp && entry.status && 
+        new Date(entry.timestamp) >= oneMonthAgo
+      );
+    }
+  } catch (error) {
+    console.warn(`Failed to load history for ${domain}:`, error.message);
+  }
+  return [];
+}
+
+function loadAllPersistedData() {
+  console.log('Loading persisted health data...');
+  config.domains.forEach(domain => {
+    const history = loadDomainHistory(domain);
+    if (history.length > 0) {
+      healthHistory.set(domain, history);
+      console.log(`Loaded ${history.length} historical entries for ${domain}`);
+    }
+  });
+}
 
 let nextCheckTime = new Date(Date.now() + config.checkIntervalMinutes * 60 * 1000);
 
@@ -96,7 +157,7 @@ async function checkDomain(domain) {
   }
 }
 
-// Add to history (keep last 24 hours)
+// Add to history (keep last 1 month)
 function addToHistory(domain, status) {
   if (!healthHistory.has(domain)) {
     healthHistory.set(domain, []);
@@ -111,11 +172,16 @@ function addToHistory(domain, status) {
     status: status
   });
   
-  // Keep only last 24 hours of data
-  const twentyFourHoursAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  healthHistory.set(domain, history.filter(entry => 
-    new Date(entry.timestamp) >= twentyFourHoursAgo
-  ));
+  // Keep only last 1 month of data
+  const oneMonthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const filteredHistory = history.filter(entry => 
+    new Date(entry.timestamp) >= oneMonthAgo
+  );
+  
+  healthHistory.set(domain, filteredHistory);
+  
+  // Persist the history data
+  saveDomainHistory(domain, filteredHistory);
 }
 
 // HTTP request helper
@@ -550,6 +616,10 @@ function start() {
   console.log(`Check interval: ${config.checkIntervalMinutes} minute(s)`);
   console.log(`Response timeout: ${config.timeoutSeconds} second(s)`);
   console.log(`Slack notifications: ${config.slackWebhookUrl ? 'Enabled' : 'Disabled'}`);
+  console.log(`Data persistence: ${config.persistDataDir}`);
+  
+  // Load persisted data
+  loadAllPersistedData();
   
   // Start web server
   server.listen(config.port, () => {
@@ -598,5 +668,8 @@ module.exports = {
   sendSlackNotification,
   addToHistory,
   generateHistoryPage,
-  generateStatusPage
+  generateStatusPage,
+  saveDomainHistory,
+  loadDomainHistory,
+  loadAllPersistedData
 };
