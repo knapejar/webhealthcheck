@@ -404,8 +404,12 @@ function generateHistoryPage(domain, history) {
   // Fill grid with actual history data
   history.forEach(entry => {
     const entryTime = new Date(entry.timestamp);
-    const minutesFromStart = Math.floor((entryTime.getTime() - (now.getTime() - minutesInDay * 60 * 1000)) / (60 * 1000));
+    // Calculate raw minutes with more precision
+    const rawMinutes = (entryTime.getTime() - (now.getTime() - minutesInDay * 60 * 1000)) / (60 * 1000);
+    // Clamp to valid range and round to nearest minute
+    const minutesFromStart = Math.max(0, Math.min(minutesInDay - 1, Math.round(rawMinutes)));
     
+    // Additional safety check (should not be needed with clamping, but good practice)
     if (minutesFromStart >= 0 && minutesFromStart < minutesInDay) {
       grid[minutesFromStart].status = entry.status;
     }
@@ -584,6 +588,7 @@ if (require.main === module) {
   start();
 }
 
+// Export functions for testing
 module.exports = {
   config,
   healthState,
@@ -591,5 +596,7 @@ module.exports = {
   checkDomain,
   makeHttpRequest,
   sendSlackNotification,
-  addToHistory
+  addToHistory,
+  generateHistoryPage,
+  generateStatusPage
 };
