@@ -1,6 +1,6 @@
 const assert = require('assert');
 const http = require('http');
-const { checkDomain, makeHttpRequest, sendSlackNotification, healthState } = require('../index.js');
+const { checkDomain, makeHttpRequest, sendSlackNotification, healthState, healthHistory } = require('../index.js');
 
 // Test utilities
 let testServer;
@@ -350,6 +350,32 @@ async function testErrorRecoveryNotification() {
   console.log('✅ Error recovery notification test passed');
 }
 
+async function testHistoryPersistence() {
+  console.log('Testing history persistence integration...');
+  
+  const domain = `http://localhost:${testServerPort}/healthy`;
+  
+  // Clear any existing history
+  healthHistory.clear();
+  
+  // Perform health checks to generate history
+  await checkDomain(domain);
+  await new Promise(resolve => setTimeout(resolve, 100));
+  await checkDomain(domain);
+  
+  const history = healthHistory.get(domain);
+  assert(history.length >= 2, 'Should have at least 2 history entries');
+  
+  // Verify history entries have proper structure
+  history.forEach(entry => {
+    assert(entry.timestamp, 'History entry should have timestamp');
+    assert(entry.status, 'History entry should have status');
+    assert(['healthy', 'unhealthy', 'unknown'].includes(entry.status), 'Status should be valid');
+  });
+  
+  console.log(`✅ History persistence integration test passed - ${history.length} entries`);
+}
+
 async function testTimeoutConfiguration() {
   console.log('Testing timeout configuration...');
   
@@ -392,6 +418,7 @@ async function runTests() {
     await test2xxStatusCodes();
     await testConsecutiveErrorNotifications();
     await testErrorRecoveryNotification();
+    await testHistoryPersistence();
     
     console.log('\n🎉 All tests passed successfully!');
     
@@ -419,5 +446,6 @@ module.exports = {
   test302RedirectHandling,
   test2xxStatusCodes,
   testConsecutiveErrorNotifications,
-  testErrorRecoveryNotification
+  testErrorRecoveryNotification,
+  testHistoryPersistence
 };
