@@ -161,12 +161,19 @@ Run the test suite to validate the health check detection:
 npm test
 ```
 
+Test the rendering fix specifically:
+
+```bash
+npm run test:fix
+```
+
 The tests verify:
 - Healthy domain detection
 - PHP error detection in page content
 - Slow response time detection (>5 seconds)
 - HTTP error status detection
 - Slack notification logic for errors and recovery
+- Non-deterministic rendering issue fix (Chrome/Android compatibility)
 
 ## Docker Compose Example
 
