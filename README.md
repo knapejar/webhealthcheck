@@ -89,6 +89,10 @@ TIMEOUT_SECONDS=10
 
 # Optional: Data persistence directory (default: ./data)
 PERSIST_DATA_DIR=./data
+
+# Optional: Enable User-Agent header for bot identification (default: true)
+# Set to 'false' to disable User-Agent header
+USER_AGENT_ENABLED=true
 ```
 
 ## Data Persistence
