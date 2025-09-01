@@ -55,6 +55,13 @@ function startTestServer() {
           res.writeHead(200);
           res.end('ok');
         });
+      } else if (url === '/echo-headers') {
+        // Echo back request headers for testing User-Agent
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          userAgent: req.headers['user-agent'] || null,
+          allHeaders: req.headers
+        }));
       } else {
         res.writeHead(404);
         res.end('Not found');
@@ -375,6 +382,38 @@ async function testMakeHttpRequest() {
   console.log('✅ HTTP request helper test passed');
 }
 
+async function testUserAgentConfiguration() {
+  console.log('Testing User-Agent header configuration...');
+  
+  // First test: User-Agent enabled (default behavior)
+  const { config } = require('../index.js');
+  
+  // Save original config
+  const originalUserAgentEnabled = config.userAgentEnabled;
+  
+  try {
+    // Test with User-Agent enabled
+    config.userAgentEnabled = true;
+    const responseEnabled = await makeHttpRequest(`http://localhost:${testServerPort}/echo-headers`);
+    const headersEnabled = JSON.parse(responseEnabled.body);
+    
+    assert.strictEqual(headersEnabled.userAgent, 'HealthcheckBot', 'Should send HealthcheckBot User-Agent when enabled');
+    
+    // Test with User-Agent disabled
+    config.userAgentEnabled = false;
+    const responseDisabled = await makeHttpRequest(`http://localhost:${testServerPort}/echo-headers`);
+    const headersDisabled = JSON.parse(responseDisabled.body);
+    
+    assert.strictEqual(headersDisabled.userAgent, null, 'Should not send User-Agent header when disabled');
+    
+    console.log('✅ User-Agent configuration test passed');
+    
+  } finally {
+    // Restore original config
+    config.userAgentEnabled = originalUserAgentEnabled;
+  }
+}
+
 // Run all tests
 async function runTests() {
   console.log('Starting Web Health Check Tests...\n');
@@ -384,6 +423,7 @@ async function runTests() {
     
     await testMakeHttpRequest();
     await testTimeoutConfiguration();
+    await testUserAgentConfiguration();
     await testHealthyDomain();
     await testPHPErrorDetection();
     await testSlowResponseDetection();

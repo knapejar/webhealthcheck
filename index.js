@@ -11,7 +11,8 @@ const config = {
   port: process.env.PORT || 3000,
   checkIntervalMinutes: parseInt(process.env.CHECK_INTERVAL_MINUTES) || 1,
   timeoutSeconds: parseInt(process.env.TIMEOUT_SECONDS) || 10,
-  persistDataDir: process.env.PERSIST_DATA_DIR || './data'
+  persistDataDir: process.env.PERSIST_DATA_DIR || './data',
+  userAgentEnabled: process.env.USER_AGENT_ENABLED !== 'false' // Default is true, set to 'false' to disable
 };
 
 // Health check state
@@ -224,10 +225,13 @@ function makeHttpRequest(domain) {
       path: parsedUrl.pathname + parsedUrl.search,
       method: 'GET',
       timeout: (config.timeoutSeconds + 5) * 1000, // Connection timeout: response timeout + 5 seconds buffer
-      headers: {
-        'User-Agent': 'WebHealthCheck/1.0'
-      }
+      headers: {}
     };
+    
+    // Add User-Agent header if enabled
+    if (config.userAgentEnabled) {
+      options.headers['User-Agent'] = 'HealthcheckBot';
+    }
     
     const req = client.request(options, (res) => {
       let body = '';
